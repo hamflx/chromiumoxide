@@ -370,6 +370,7 @@ impl FrameManager {
     }
 
     pub fn on_frame_attached(&mut self, frame_id: FrameId, parent_frame_id: Option<FrameId>) {
+        println!("on_frame_attached: {:?}, {:?}", frame_id, parent_frame_id);
         if self.frames.contains_key(&frame_id) {
             return;
         }

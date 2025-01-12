@@ -89,6 +89,7 @@ pub mod fetcher {
     pub use chromiumoxide_fetcher::*;
 }
 pub mod async_process;
+pub mod frame;
 pub mod handler;
 pub mod js;
 pub mod keys;

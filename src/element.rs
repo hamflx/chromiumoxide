@@ -36,7 +36,7 @@ pub struct Element {
 }
 
 impl Element {
-    pub(crate) async fn new(tab: Arc<PageInner>, node_id: NodeId) -> Result<Self> {
+    pub async fn new(tab: Arc<PageInner>, node_id: NodeId) -> Result<Self> {
         let backend_node_id = tab
             .execute(
                 DescribeNodeParams::builder()
@@ -117,6 +117,27 @@ impl Element {
             width: model.width as u32,
             height: model.height as u32,
         })
+    }
+
+    pub async fn shadow_root(&self) -> Result<Option<Vec<Element>>> {
+        let resp = self
+            .tab
+            .execute(
+                DescribeNodeParams::builder()
+                    .node_id(self.node_id)
+                    .depth(100)
+                    .build(),
+            )
+            .await?;
+        if let Some(shadow_roots) = resp.result.node.shadow_roots {
+            let mut elements = Vec::with_capacity(shadow_roots.len());
+            for node in shadow_roots {
+                elements.push(Element::new(Arc::clone(&self.tab), node.node_id).await?);
+            }
+            Ok(Some(elements))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Returns the bounding box of the element (relative to the main frame)

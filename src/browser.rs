@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use chromiumoxide_cdp::cdp::browser_protocol::page::FrameId;
 use futures::channel::mpsc::{channel, unbounded, Sender};
 use futures::channel::oneshot::channel as oneshot_channel;
 use futures::select;
@@ -16,11 +17,12 @@ use chromiumoxide_cdp::cdp::browser_protocol::storage::{
     ClearCookiesParams, GetCookiesParams, SetCookiesParams,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::target::{
-    CreateBrowserContextParams, CreateTargetParams, DisposeBrowserContextParams, TargetId,
-    TargetInfo,
+    AttachToTargetParams, CreateBrowserContextParams, CreateTargetParams,
+    DisposeBrowserContextParams, TargetId, TargetInfo,
 };
 use chromiumoxide_cdp::cdp::{CdpEventMessage, IntoEventKind};
 use chromiumoxide_types::*;
+use url::Url;
 
 use crate::async_process::{self, Child, ExitStatus, Stdio};
 use crate::cmd::{to_command_response, CommandMessage};
@@ -184,6 +186,11 @@ impl Browser {
             };
             // extract the ws:
             let debug_ws_url = ws_url_from_output(child, timeout_fut).await?;
+            println!("debug_ws_url: {:?}", debug_ws_url);
+            println!("debug_ws_url: {:?}", debug_ws_url);
+            println!("debug_ws_url: {:?}", debug_ws_url);
+            println!("debug_ws_url: {:?}", debug_ws_url);
+            println!("debug_ws_url: {:?}", debug_ws_url);
             let conn = Connection::<CdpEventMessage>::connect(&debug_ws_url).await?;
             Ok((debug_ws_url, conn))
         }
@@ -231,6 +238,89 @@ impl Browser {
         Ok((browser, fut))
     }
 
+    // /// Launches a new instance of `chromium` in the background and attaches to
+    // /// its debug web socket.
+    // ///
+    // /// This fails when no chromium executable could be detected.
+    // ///
+    // /// This fails if no web socket url could be detected from the child
+    // /// processes stderr for more than the configured `launch_timeout`
+    // /// (20 seconds by default).
+    // pub async fn frame(&self, frame_id: FrameId) -> Result<(Self, Handler)> {
+    //     let url = Url::parse(&self.debug_ws_url).unwrap();
+    //     let url = url
+    //         .join(&format!("/json/frame/{}", frame_id.inner()))
+    //         .unwrap();
+    //     let conn = Connection::<CdpEventMessage>::connect(&url.to_string()).await?;
+
+    //     /// Faillible initialization to run once the child process is created.
+    //     ///
+    //     /// All faillible calls must be executed inside this function. This ensures that all
+    //     /// errors are caught and that the child process is properly cleaned-up.
+    //     async fn with_child(
+    //         config: &BrowserConfig,
+    //         child: &mut Child,
+    //     ) -> Result<(String, Connection<CdpEventMessage>)> {
+    //         let dur = config.launch_timeout;
+    //         cfg_if::cfg_if! {
+    //             if #[cfg(feature = "async-std-runtime")] {
+    //                 let timeout_fut = Box::pin(async_std::task::sleep(dur));
+    //             } else if #[cfg(feature = "tokio-runtime")] {
+    //                 let timeout_fut = Box::pin(tokio::time::sleep(dur));
+    //             } else {
+    //                 panic!("missing chromiumoxide runtime: enable `async-std-runtime` or `tokio-runtime`")
+    //             }
+    //         };
+    //         // extract the ws:
+    //         let debug_ws_url = ws_url_from_output(child, timeout_fut).await?;
+    //         println!("debug_ws_url: {:?}", debug_ws_url);
+    //         let conn = Connection::<CdpEventMessage>::connect(&debug_ws_url).await?;
+    //         Ok((debug_ws_url, conn))
+    //     }
+
+    //     let (debug_ws_url, conn) = match with_child(&config, &mut child).await {
+    //         Ok(conn) => conn,
+    //         Err(e) => {
+    //             // An initialization error occurred, clean up the process
+    //             if let Ok(Some(_)) = child.try_wait() {
+    //                 // already exited, do nothing, may happen if the browser crashed
+    //             } else {
+    //                 // the process is still alive, kill it and wait for exit (avoid zombie processes)
+    //                 child.kill().await.expect("`Browser::launch` failed but could not clean-up the child process (`kill`)");
+    //                 child.wait().await.expect("`Browser::launch` failed but could not clean-up the child process (`wait`)");
+    //             }
+    //             return Err(e);
+    //         }
+    //     };
+
+    //     // Only infaillible calls are allowed after this point to avoid clean-up issues with the
+    //     // child process.
+
+    //     let (tx, rx) = channel(1);
+
+    //     let handler_config = HandlerConfig {
+    //         ignore_https_errors: config.ignore_https_errors,
+    //         viewport: config.viewport.clone(),
+    //         context_ids: Vec::new(),
+    //         request_timeout: config.request_timeout,
+    //         request_intercept: config.request_intercept,
+    //         cache_enabled: config.cache_enabled,
+    //     };
+
+    //     let fut = Handler::new(conn, rx, handler_config);
+    //     let browser_context = fut.default_browser_context().clone();
+
+    //     let browser = Self {
+    //         sender: tx,
+    //         config: Some(config),
+    //         child: Some(child),
+    //         debug_ws_url,
+    //         browser_context,
+    //     };
+
+    //     Ok((browser, fut))
+    // }
+
     /// Request to fetch all existing browser targets.
     ///
     /// By default, only targets launched after the browser connection are tracked
@@ -248,6 +338,16 @@ impl Browser {
             .send(HandlerMessage::FetchTargets(tx))
             .await?;
 
+        rx.await?
+    }
+
+    pub async fn attach_to_target(&mut self, target_id: TargetId) -> Result<Page> {
+        let params = AttachToTargetParams::new(target_id);
+        let (tx, rx) = oneshot_channel();
+        self.sender
+            .clone()
+            .send(HandlerMessage::AttachToTarget(params, tx))
+            .await?;
         rx.await?
     }
 
@@ -395,6 +495,7 @@ impl Browser {
         let (tx, rx) = oneshot_channel();
         let mut params = params.into();
         if let Some(id) = self.browser_context.id() {
+            println!("id: {:?}", id);
             if params.browser_context_id.is_none() {
                 params.browser_context_id = Some(id.clone());
             }
@@ -1008,3 +1109,186 @@ static DEFAULT_ARGS: [&str; 25] = [
     "--enable-blink-features=IdleDetection",
     "--lang=en_US",
 ];
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use futures::StreamExt as _;
+
+    use crate::{layout::Point, Element};
+
+    use super::*;
+
+    pub async fn wait_for<F, R>(
+        page: &Page,
+        xpath: &str,
+        timeout_in_seconds: u64,
+        f: F,
+    ) -> Result<Element, String>
+    where
+        F: Fn(Element) -> R,
+        R: Future<Output = Result<bool, String>>,
+    {
+        let begin = std::time::Instant::now();
+        while std::time::Instant::now().duration_since(begin)
+            < std::time::Duration::from_secs(timeout_in_seconds)
+        {
+            if let Ok(element) = page.find_xpath(xpath).await {
+                if f(element).await? {
+                    return page
+                        .find_xpath(xpath)
+                        .await
+                        .map_err(|err| format!("查找元素失败 (xpath: {})：{:?}", xpath, err));
+                }
+            }
+            async_std::task::sleep(Duration::from_millis(100)).await;
+        }
+        Err(format!(
+            "未找到元素 (xpath: {}) 超时 ({} 秒)",
+            xpath, timeout_in_seconds
+        ))
+    }
+
+    pub async fn wait_for_element(
+        page: &Page,
+        xpath: &str,
+        timeout_in_seconds: u64,
+    ) -> Result<Element, String> {
+        wait_for(page, xpath, timeout_in_seconds, |_| async { Ok(true) }).await
+    }
+
+    #[async_std::test]
+    async fn test_browser_launch() {
+        println!("test_browser_launch");
+
+        let (mut browser, mut handler) = Browser::launch(
+            BrowserConfig::builder()
+                .with_head()
+                .port(9220)
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        // Spawn the browser handler
+        async_std::task::spawn(async move {
+            while let Some(h) = handler.next().await {
+                if let Err(e) = h {}
+            }
+        });
+
+        let page = browser
+            .new_page("https://authenticator.cursor.sh/sign-up")
+            .await
+            .unwrap();
+
+        page.enable_dom().await.unwrap();
+        page.enable_runtime().await.unwrap();
+
+        let first_name_input =
+            wait_for_element(&page, "//input[@placeholder='Your first name']", 10)
+                .await
+                .unwrap();
+        first_name_input.click().await.unwrap();
+        async_std::task::sleep(Duration::from_millis(100)).await;
+        first_name_input.type_str("John").await.unwrap();
+
+        let last_name_input = wait_for_element(&page, "//input[@placeholder='Your last name']", 10)
+            .await
+            .unwrap();
+        last_name_input.click().await.unwrap();
+        async_std::task::sleep(Duration::from_millis(100)).await;
+        last_name_input.type_str("Doe").await.unwrap();
+
+        let email_input = wait_for_element(&page, "//input[@placeholder='Your email address']", 10)
+            .await
+            .unwrap();
+        email_input.click().await.unwrap();
+        async_std::task::sleep(Duration::from_millis(100)).await;
+        email_input.type_str("john.doe@example.com").await.unwrap();
+
+        let submit = wait_for_element(&page, "//button[contains(text(), 'Continue')]", 10)
+            .await
+            .unwrap();
+        submit.click().await.unwrap();
+
+        async_std::task::sleep(Duration::from_secs(1)).await;
+
+        println!("page id: {:?}", page.target_id());
+        let frames = page.frames().await.unwrap();
+
+        println!("frames: {:?}", frames);
+
+        let targets = browser.fetch_targets().await.unwrap();
+        for t in &targets {
+            println!(
+                "target: {:?}, title: {:?}, id: {:?}",
+                t.url, t.title, t.target_id
+            );
+            async_std::task::sleep(Duration::from_secs(1)).await;
+
+            if t.url.contains("challenges.cloudflare.com") {
+                let p = browser.get_page(t.target_id.clone()).await.unwrap();
+                println!("page created!!!!!!!!!!!!!!");
+
+                let body = p.find_element("body").await.unwrap();
+
+                let shadow_root = body
+                    .shadow_root()
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .into_iter()
+                    .next()
+                    .unwrap();
+                let input = shadow_root.find_element("input").await.unwrap();
+
+                let bbox = input.bounding_box().await.unwrap();
+                println!("bbox: {:?}", bbox);
+                input.click().await.unwrap();
+
+                println!("page created!!!!!!!!!!!!!!");
+                // println!("p: {:?}", p);
+            }
+        }
+
+        let frame_id = frames
+            .into_iter()
+            .filter(|f| !targets.iter().any(|t| t.target_id.inner() == f.inner()))
+            .next()
+            .unwrap();
+        println!("frame_id: {:?}", frame_id);
+
+        // let pages = browser.pages().await.unwrap();
+        // for p in pages {
+        //     println!(
+        //         "page: {:?}, url: {:?}",
+        //         p.get_title().await.unwrap(),
+        //         p.url().await.unwrap()
+        //     );
+        // }
+
+        // browser
+        //     .attach_to_target(TargetId::from(frame_id.inner().to_string()))
+        //     .await
+        //     .unwrap();
+
+        // browser.frame(config);
+
+        async_std::task::sleep(Duration::from_secs(10000)).await;
+
+        browser.close().await.unwrap();
+    }
+}
+
+// static DEFAULT_ARGS: [&str; 7] = [
+//     "--disable-features=PrivacySandboxSettings4",
+//     "--disable-popup-blocking",
+//     "--no-first-run",
+//     "--no-default-browser-check",
+//     "--disable-suggestions-ui",
+//     "--disable-infobars",
+//     "--hide-crash-restore-bubble",
+// ];

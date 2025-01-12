@@ -66,7 +66,7 @@ impl PageHandle {
 }
 
 #[derive(Debug)]
-pub(crate) struct PageInner {
+pub struct PageInner {
     target_id: TargetId,
     session_id: SessionId,
     opener_id: Option<TargetId>,

@@ -65,7 +65,7 @@ macro_rules! advance_state {
 #[derive(Debug)]
 pub struct Target {
     /// Info about this target as returned from the chromium instance
-    info: TargetInfo,
+    pub info: TargetInfo,
     /// The type of this target
     r#type: TargetType,
     /// Configs for this target
@@ -171,12 +171,17 @@ impl Target {
 
     /// Tries to create the `PageInner` if this target is already initialized
     pub(crate) fn get_or_create_page(&mut self) -> Option<&Arc<PageInner>> {
+        println!("get_or_create_page: {:?}", self.target_id());
         self.create_page();
         self.page.as_ref().map(|p| p.inner())
     }
 
     pub fn is_page(&self) -> bool {
         self.r#type().is_page()
+    }
+
+    pub fn is_iframe(&self) -> bool {
+        self.r#type().is_iframe()
     }
 
     pub fn browser_context_id(&self) -> Option<&BrowserContextId> {
@@ -320,7 +325,7 @@ impl Target {
 
     /// Advance that target's state
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>, now: Instant) -> Option<TargetEvent> {
-        if !self.is_page() {
+        if !self.is_page() && !self.is_iframe() {
             // can only poll pages
             return None;
         }
@@ -619,6 +624,7 @@ impl Default for TargetConfig {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TargetType {
     Page,
+    IFrame,
     BackgroundPage,
     ServiceWorker,
     SharedWorker,
@@ -632,6 +638,7 @@ impl TargetType {
     pub fn new(ty: &str) -> Self {
         match ty {
             "page" => TargetType::Page,
+            "iframe" => TargetType::IFrame,
             "background_page" => TargetType::BackgroundPage,
             "service_worker" => TargetType::ServiceWorker,
             "shared_worker" => TargetType::SharedWorker,
@@ -644,6 +651,10 @@ impl TargetType {
 
     pub fn is_page(&self) -> bool {
         matches!(self, TargetType::Page)
+    }
+
+    pub fn is_iframe(&self) -> bool {
+        matches!(self, TargetType::IFrame)
     }
 
     pub fn is_background_page(&self) -> bool {

@@ -103,6 +103,7 @@ impl<T: EventMessage> Connection<T> {
             if let Some(cmd) = self.pending_commands.pop_front() {
                 tracing::trace!("Sending {:?}", cmd);
                 let msg = serde_json::to_string(&cmd)?;
+                // println!("  > {:?}", msg);
                 self.ws.start_send_unpin(msg.into())?;
                 self.pending_flush = Some(cmd);
             }
@@ -141,6 +142,7 @@ impl<T: EventMessage + Unpin> Stream for Connection<T> {
             // read from the ws
             match ready!(pin.ws.poll_next_unpin(cx)) {
                 Some(Ok(WsMessage::Text(text))) => {
+                    // println!("  < {:?}", text);
                     let ready = match serde_json::from_str::<Message<T>>(&text) {
                         Ok(msg) => {
                             tracing::trace!("Received {:?}", msg);

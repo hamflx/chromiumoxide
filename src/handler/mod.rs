@@ -237,6 +237,28 @@ impl Handler {
                         }
                     }
                 }
+                PendingRequest::AttachToTarget(tx) => {
+                    match to_command_response::<AttachToTargetParams>(resp, method) {
+                        Ok(resp) => {
+                            println!(
+                                "attach to target resp: {:?}, {:?}",
+                                resp.session_id, resp.result.session_id
+                            );
+                            // if let Some(target) = self.targets.get_mut(&resp.target_id) {
+                            //     // move the sender to the target that sends its page once
+                            //     // initialized
+                            //     target.set_initiator(tx);
+                            // } else {
+                            //     // TODO can this even happen?
+                            //     panic!("Created target not present")
+                            // }
+                        }
+                        Err(err) => {
+                            println!("attach to target err: {:?}", err);
+                            let _ = tx.send(Err(err)).ok();
+                        }
+                    }
+                }
                 PendingRequest::Navigate(id) => {
                     self.on_navigation_response(id, resp);
                 }
@@ -300,6 +322,21 @@ impl Handler {
 
         self.pending_commands
             .insert(call_id, (PendingRequest::GetTargets(tx), method, now));
+    }
+
+    fn submit_attach_to_target(
+        &mut self,
+        params: AttachToTargetParams,
+        tx: OneshotSender<Result<Page>>,
+        now: Instant,
+    ) {
+        let method = params.identifier();
+        let call_id = self
+            .conn
+            .submit_command(method.clone(), None, serde_json::to_value(params).unwrap())
+            .unwrap();
+        self.pending_commands
+            .insert(call_id, (PendingRequest::AttachToTarget(tx), method, now));
     }
 
     /// Send the Request over to the server and store its identifier to handle
@@ -446,6 +483,10 @@ impl Handler {
 
     /// A new session is attached to a target
     fn on_attached_to_target(&mut self, event: Box<EventAttachedToTarget>) {
+        println!(
+            "on_attached_to_target, session_id: {:?}, target_id: {:?}, target_type: {:?}, target_url: {:?}",
+            event.session_id, event.target_info.target_id, event.target_info.r#type, event.target_info.url
+        );
         let session = Session::new(event.session_id.clone(), event.target_info.target_id);
         if let Some(target) = self.targets.get_mut(session.target_id()) {
             target.set_session_id(session.session_id().clone())
@@ -495,6 +536,9 @@ impl Handler {
                     PendingRequest::GetTargets(tx) => {
                         let _ = tx.send(Err(CdpError::Timeout));
                     }
+                    PendingRequest::AttachToTarget(tx) => {
+                        let _ = tx.send(Err(CdpError::Timeout));
+                    }
                     PendingRequest::Navigate(nav) => {
                         if let Some(nav) = self.navigations.remove(&nav) {
                             match nav {
@@ -540,6 +584,9 @@ impl Stream for Handler {
                     HandlerMessage::FetchTargets(tx) => {
                         pin.submit_fetch_targets(tx, now);
                     }
+                    HandlerMessage::AttachToTarget(params, tx) => {
+                        pin.submit_attach_to_target(params, tx, now);
+                    }
                     HandlerMessage::CloseBrowser(tx) => {
                         pin.submit_close(tx, now);
                     }
@@ -563,10 +610,17 @@ impl Stream for Handler {
                         pin.browser_contexts.remove(&ctx);
                     }
                     HandlerMessage::GetPage(target_id, tx) => {
+                        println!("targets: ");
+                        for t in pin.targets.values() {
+                            println!("  {:?} => {:?}", t.target_id(), t.info.url);
+                        }
                         let page = pin
                             .targets
                             .get_mut(&target_id)
-                            .and_then(|target| target.get_or_create_page())
+                            .and_then(|target| {
+                                println!("HandlerMessage::GetPage");
+                                target.get_or_create_page()
+                            })
                             .map(|page| Page::from(page.clone()));
                         let _ = tx.send(page);
                     }
@@ -723,6 +777,7 @@ enum PendingRequest {
     CreateTarget(OneshotSender<Result<Page>>),
     /// A Request to fetch old `Target`s created before connection
     GetTargets(OneshotSender<Result<Vec<TargetInfo>>>),
+    AttachToTarget(OneshotSender<Result<Page>>),
     /// A Request to navigate a specific `Target`.
     ///
     /// Navigation requests are not automatically completed once the response to
@@ -746,6 +801,7 @@ enum PendingRequest {
 pub(crate) enum HandlerMessage {
     CreatePage(CreateTargetParams, OneshotSender<Result<Page>>),
     FetchTargets(OneshotSender<Result<Vec<TargetInfo>>>),
+    AttachToTarget(AttachToTargetParams, OneshotSender<Result<Page>>),
     InsertContext(BrowserContext),
     DisposeContext(BrowserContext),
     GetPages(OneshotSender<Vec<Page>>),

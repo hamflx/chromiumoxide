@@ -41,7 +41,7 @@ use crate::{utils, ArcHttpRequest};
 
 #[derive(Debug, Clone)]
 pub struct Page {
-    inner: Arc<PageInner>,
+    pub inner: Arc<PageInner>,
 }
 
 impl Page {
@@ -446,8 +446,12 @@ impl Page {
     ///
     /// Execute a query selector on the document's node.
     pub async fn find_element(&self, selector: impl Into<String>) -> Result<Element> {
+        let selector = selector.into();
+        println!("find_element: {:?}", selector);
         let root = self.get_document().await?.node_id;
+        println!("root: {:?}", root);
         let node_id = self.inner.find_element(selector, root).await?;
+        println!("node_id: {:?}", node_id);
         Element::new(Arc::clone(&self.inner), node_id).await
     }
 
